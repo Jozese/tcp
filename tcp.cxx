@@ -1,4 +1,5 @@
 #include "tcp.hpp"
+#include <openssl/x509.h>
 
 namespace Tcp {
 Client::Client(const std::string &host, const std::string &port)
@@ -459,6 +460,11 @@ void Client::_cleanup() {
   if (_c_socket != -1) {
     CLOSE_SOCKET(_c_socket);
     _c_socket = -1;
+  }
+
+  if (_server_cert) {
+    X509_free(_server_cert);
+    _server_cert = nullptr;
   }
 
   if (_ll_dns) {
