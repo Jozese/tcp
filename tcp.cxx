@@ -1,6 +1,4 @@
 #include "tcp.hpp"
-#include <openssl/ssl.h>
-#include <openssl/x509.h>
 
 namespace Tcp {
 Client::Client(const std::string &host, const std::string &port)
