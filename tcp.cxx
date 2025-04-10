@@ -1,4 +1,5 @@
 #include "tcp.hpp"
+#include <openssl/ssl.h>
 #include <openssl/x509.h>
 
 namespace Tcp {
@@ -270,21 +271,18 @@ void Client::disconnect() {
 
 bool Client::is_connected() {
 #if defined(_WIN32) || defined(_WIN64)
-  return false;
-#endif
-
+  return false
+#else
   if (!_connected)
     return false;
 
   int socket = _is_ssl && _ssl ? SSL_get_fd(_ssl) : _c_socket;
-
   if (socket < 0) {
     _connected = false;
     return false;
   }
 
   struct pollfd poll_fd = {.fd = socket, .events = POLLIN, .revents = 0};
-
   int poll_r = poll(&poll_fd, 1, 0);
 
   if (poll_r < 0) {
@@ -292,7 +290,6 @@ bool Client::is_connected() {
     return false;
   }
 
-  // edge case here?
   if (poll_r == 0)
     return true;
 
@@ -303,7 +300,12 @@ bool Client::is_connected() {
 
   if (poll_fd.revents & POLLIN) {
     uint8_t byte;
-    int read = ::recv(socket, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
+    int read = 0;
+    if (_is_ssl && _ssl)
+      read = SSL_peek(_ssl, &byte, 1);
+    else
+      read = ::recv(socket, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
+
     if (read == 0) {
       disconnect();
       return false;
@@ -315,8 +317,8 @@ bool Client::is_connected() {
       return false;
     }
   }
-
   return true;
+#endif
 }
 
 int Client::send(const uint8_t *data, size_t size) {

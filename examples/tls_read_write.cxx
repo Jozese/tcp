@@ -26,8 +26,11 @@ int main(void) {
                      reinterpret_cast<const uint8_t *>(http_request.data()),
                      http_request.size())
               << "\n";
-    auto all = client.recv_all();
-    std::cout.write(reinterpret_cast<const char *>(all.data()), all.size());
+    while (client.is_connected()) {
+      std::cout << client.is_connected() << std::endl;
+      auto all = client.recv_all();
+      std::cout.write(reinterpret_cast<const char *>(all.data()), all.size());
+    }
   } else {
     std::cout << "Could not connect to host!";
     return 1;
