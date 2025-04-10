@@ -116,7 +116,7 @@ bool Client::_open_ssl_setup() {
   if (!_ciphers.empty())
     res = SSL_CTX_set_cipher_list(_ssl_ctx, _ciphers.c_str());
 
-  return true && res;
+  return res == 1;
 }
 
 void Client::set_tls_min_version(int version) { _min_tls_version = version; }
@@ -231,7 +231,7 @@ bool Client::connect() {
     return false;
   }
 #elif defined(_WIN32) || defined(_WIN64)
-  if (::connect(cSocket, (SOCKADDR *)&sAddr, sizeof(sAddr)) == SOCKET_ERROR) {
+  if (::connect(_c_socket, (SOCKADDR *)&sAddr, sizeof(sAddr)) == SOCKET_ERROR) {
     _cleanup();
     return false;
   }
