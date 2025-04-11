@@ -324,8 +324,12 @@ int Client::send(const uint8_t* data, size_t size) {
 	if (!_is_flag(Flags::CONNECTED))
 		return ret;
 	if (_is_flag(Flags::IS_SSL) && _ssl)
-		return SSL_write(_ssl, data, size);
-	return write(_c_socket, data, size);
+		ret = SSL_write(_ssl, data, size);
+	ret = write(_c_socket, data, size);
+
+	if (ret == -1)
+		disconnect();
+	return ret;
 }
 
 int Client::send_all(const std::vector<uint8_t>& data) {
@@ -343,8 +347,10 @@ int Client::send_all(const std::vector<uint8_t>& data) {
 		else
 			sent = write(_c_socket, data.data() + total, left);
 
-		if (sent <= 0)
+		if (sent <= 0) {
+			disconnect();
 			return -1;
+		}
 
 		if (left == 0)
 			break;
@@ -388,6 +394,7 @@ std::vector<uint8_t> Client::recv_all(size_t chunk_size, int poll_ms) {
 		int poll_r = poll(&poll_fd, 1, poll_ms);
 
 		if (poll_r <= 0 || !(poll_fd.revents & POLLIN)) {
+			disconnect();
 			return ret;
 		}
 
@@ -398,6 +405,7 @@ std::vector<uint8_t> Client::recv_all(size_t chunk_size, int poll_ms) {
 			read = ::recv(_c_socket, temp.data(), temp.size(), 0);
 
 		if (read == 0) {
+			disconnect();
 			return ret;
 		}
 		ret.insert(ret.end(), temp.begin(), temp.begin() + read);
