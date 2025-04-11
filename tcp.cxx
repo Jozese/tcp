@@ -1,14 +1,17 @@
 #include "tcp.hpp"
+#include <cstdlib>
 
 namespace Tcp {
-Client::Client(const std::string& host, const std::string& port) : _host(host), _port(port), _is_ssl(true) {
+Client::Client(const std::string& host, const std::string& port) : _host(host), _port(port) {
 	SSL_library_init();
 	OpenSSL_add_all_algorithms();
 }
 
-Client::Client(const std::string& host, const std::string& port, bool ssl) : _host(host), _port(port), _is_ssl(ssl) {
+Client::Client(const std::string& host, const std::string& port, bool ssl) : _host(host), _port(port) {
 	SSL_library_init();
 	OpenSSL_add_all_algorithms();
+	if (!ssl)
+		_clear_flag(Flags::IS_SSL);
 }
 
 Client::~Client() {
@@ -17,23 +20,23 @@ Client::~Client() {
 
 void Client::reset() {
 	_cleanup();
-	*this = Tcp::Client(_host, _port, _is_ssl);
+	*this = Tcp::Client(_host, _port, _is_flag(Flags::IS_SSL));
 }
 
 const std::string Client::get_tls_sni() const {
-	if (!_connected || !_ssl)
+	if (!_is_flag(Flags::CONNECTED) || !_ssl)
 		return "";
 	return SSL_get_servername(_ssl, TLSEXT_NAMETYPE_host_name);
 }
 
 const std::string Client::get_tls_version() const {
-	if (!_connected || !_ssl)
+	if (!_is_flag(Flags::CONNECTED) || !_ssl)
 		return "";
 	return SSL_get_version(_ssl);
 }
 
 const std::string Client::get_tls_con_cipher() const {
-	if (!_connected || !_ssl)
+	if (!_is_flag(Flags::CONNECTED) || !_ssl)
 		return "";
 	return SSL_get_cipher(_ssl);
 }
@@ -63,7 +66,10 @@ const std::string Client::get_certificate_issuer() const {
 
 	// assuming this null terminates else use bio api
 	char* subject = X509_NAME_oneline(X509_get_subject_name(_server_cert), 0, 0);
-	return std::string(subject);
+	std::string ret(subject);
+
+	free(subject);
+	return ret;
 }
 
 const std::string Client::get_certificate_sha256_digest() const {
@@ -92,12 +98,12 @@ bool Client::_open_ssl_setup() {
 	if (!_ssl_ctx)
 		return false;
 
-	if (_verify)
+	if (_is_flag(Flags::VERIFY))
 		SSL_CTX_set_verify(_ssl_ctx, SSL_VERIFY_PEER, nullptr);
 	else
 		SSL_CTX_set_verify(_ssl_ctx, SSL_VERIFY_NONE, nullptr);
 
-	if (_disable_insecure)
+	if (_is_flag(Flags::DISABLE_INSECURE))
 		SSL_CTX_set_options(_ssl_ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
 
 	SSL_CTX_set_min_proto_version(_ssl_ctx, _min_tls_version);
@@ -123,37 +129,37 @@ void Client::set_tls_max_version(int version) {
 }
 
 void Client::set_verify(bool verify) {
-	if (_setup)
+	if (_is_flag(Flags::SETUP))
 		return;
-	_verify = verify;
+	_set_flag_bool(Flags::VERIFY, verify);
 }
 
 void Client::set_verify_hostname(bool verify) {
-	if (_setup)
+	if (_is_flag(Flags::SETUP))
 		return;
-	_verify_hostname = verify;
+	_set_flag_bool(Flags::VERIFY_HOSTNAME, verify);
 }
 
 void Client::set_alpn_protocols(const std::vector<unsigned char>& protocols) {
-	if (_setup)
+	if (_is_flag(Flags::SETUP))
 		return;
 	_alpn_protocols = protocols;
 }
 
 void Client::set_disable_insecure_protocols(bool disable) {
-	if (_setup)
+	if (_is_flag(Flags::SETUP))
 		return;
-	_disable_insecure = disable;
+	_set_flag_bool(Flags::DISABLE_INSECURE, disable);
 }
 
 void Client::set_verify_locations(const std::pair<std::string, std::string>& path) {
-	if (_setup)
+	if (_is_flag(Flags::SETUP))
 		return;
 	_paths = path;
 }
 
 void Client::set_cipher_suites(const std::string& ciphers) {
-	if (_setup)
+	if (_is_flag(Flags::SETUP))
 		return;
 	_ciphers = ciphers;
 }
@@ -165,10 +171,9 @@ bool Client::setup() {
 		return false;
 	}
 #endif
-	if (_setup)
+	if (_is_flag(Flags::SETUP))
 		return false;
-
-	if (_is_ssl && !_open_ssl_setup())
+	if (_is_flag(Flags::IS_SSL) && !_open_ssl_setup())
 		return false;
 
 	if (!_resolve_domain_name()) {
@@ -184,23 +189,23 @@ bool Client::setup() {
 	}
 
 	if (_c_socket == -1) {
-		_setup = false;
+		_clear_flag(Flags::SETUP);
 		return false;
 	}
 
-	_setup = true;
+	_set_flag(Flags::SETUP);
 	return true;
 }
 
 bool Client::connect() {
-	TCP_ASSERT(_setup, "Forgot to call setup before connect?");
+	TCP_ASSERT(_is_flag(Flags::SETUP), "Forgot to call setup before connect?");
 
 	if (_c_socket == -1 && _final_addr) {
 		// cached dns res which is likely gonna be correct
 		_c_socket = socket(_final_addr->ai_family, _final_addr->ai_socktype, _final_addr->ai_protocol);
 	}
 
-	if (!_ssl && _is_ssl)
+	if (!_ssl && _is_flag(Flags::IS_SSL))
 		_ssl = SSL_new(_ssl_ctx);
 	if (_ssl && SSL_set_fd(_ssl, _c_socket) != 1) {
 		_cleanup();
@@ -216,7 +221,7 @@ bool Client::connect() {
 		return false;
 	}
 
-	if (_ssl && _verify_hostname) {
+	if (_ssl && _is_flag(Flags::VERIFY_HOSTNAME)) {
 		SSL_set1_host(_ssl, _host.c_str());
 	}
 
@@ -232,24 +237,24 @@ bool Client::connect() {
 	}
 #endif
 
-	if (_is_ssl && SSL_connect(_ssl) != 1)
+	if (_is_flag(Flags::IS_SSL) && SSL_connect(_ssl) != 1)
 		return false;
-	_connected = true;
+	_set_flag(Flags::CONNECTED);
 
 	// gets leaf certificate not entire chain
-	if (_is_ssl && _ssl)
+	if (_is_flag(Flags::IS_SSL) && _ssl)
 		_server_cert = SSL_get_peer_certificate(_ssl);
 	return true;
 }
 
 void Client::disconnect() {
-	if (_connected && _ssl)
+	if (_is_flag(Flags::CONNECTED) && _ssl)
 		SSL_shutdown(_ssl);
 
-	if (_connected)
+	if (_is_flag(Flags::CONNECTED))
 		shutdown(_c_socket, SHUT_RDWR);
 
-	_connected = false;
+	_clear_flag(Flags::CONNECTED);
 
 	if (_ssl) {
 		SSL_free(_ssl);
@@ -266,12 +271,12 @@ bool Client::is_connected() {
 #if defined(_WIN32) || defined(_WIN64)
 	return false
 #else
-	if (!_connected)
+	if (!_is_flag(Flags::CONNECTED))
 		return false;
 
-	int socket = _is_ssl && _ssl ? SSL_get_fd(_ssl) : _c_socket;
+	int socket = _is_flag(Flags::IS_SSL) && _ssl ? SSL_get_fd(_ssl) : _c_socket;
 	if (socket < 0) {
-		_connected = false;
+		_is_flag(Flags::CONNECTED);
 		return false;
 	}
 
@@ -294,7 +299,7 @@ bool Client::is_connected() {
 	if (poll_fd.revents & POLLIN) {
 		uint8_t byte;
 		int read = 0;
-		if (_is_ssl && _ssl)
+		if (_is_flag(Flags::IS_SSL) && _ssl)
 			read = SSL_peek(_ssl, &byte, 1);
 		else
 			read = ::recv(socket, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
@@ -305,7 +310,7 @@ bool Client::is_connected() {
 		}
 
 		if (read < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-			_connected = false;
+			_clear_flag(Flags::CONNECTED);
 			disconnect();
 			return false;
 		}
@@ -316,16 +321,16 @@ bool Client::is_connected() {
 
 int Client::send(const uint8_t* data, size_t size) {
 	int ret = -1;
-	if (!_connected)
+	if (!_is_flag(Flags::CONNECTED))
 		return ret;
-	if (_is_ssl && _ssl)
+	if (_is_flag(Flags::IS_SSL) && _ssl)
 		return SSL_write(_ssl, data, size);
 	return write(_c_socket, data, size);
 }
 
 int Client::send_all(const std::vector<uint8_t>& data) {
 	int ret = -1;
-	if (!_connected)
+	if (!_is_flag(Flags::CONNECTED))
 		return ret;
 
 	size_t total = 0;
@@ -333,7 +338,7 @@ int Client::send_all(const std::vector<uint8_t>& data) {
 
 	size_t sent;
 	while (total < data.size()) {
-		if (_is_ssl && _ssl)
+		if (_is_flag(Flags::IS_SSL) && _ssl)
 			sent = SSL_write(_ssl, data.data() + total, left);
 		else
 			sent = write(_c_socket, data.data() + total, left);
@@ -351,11 +356,11 @@ int Client::send_all(const std::vector<uint8_t>& data) {
 }
 
 std::vector<uint8_t> Client::recv(size_t to_recv, int flags) {
-	if (!_connected || to_recv == 0)
+	if (!_is_flag(Flags::CONNECTED) || to_recv == 0)
 		return {};
 	std::vector<uint8_t> ret(to_recv);
 	int recv;
-	if (_is_ssl && _ssl)
+	if (_is_flag(Flags::IS_SSL) && _ssl)
 		recv = SSL_read(_ssl, ret.data(), to_recv);
 	else
 		recv = ::recv(_c_socket, ret.data(), to_recv, flags);
@@ -369,12 +374,12 @@ std::vector<uint8_t> Client::recv(size_t to_recv, int flags) {
 }
 
 std::vector<uint8_t> Client::recv_all(size_t chunk_size, int poll_ms) {
-	if (!_connected)
+	if (!_is_flag(Flags::CONNECTED))
 		return {};
 
 	std::vector<uint8_t> ret;
 
-	int socket = _is_ssl && _ssl ? SSL_get_fd(_ssl) : _c_socket;
+	int socket = _is_flag(Flags::IS_SSL) && _ssl ? SSL_get_fd(_ssl) : _c_socket;
 
 	struct pollfd poll_fd = {.fd = socket, .events = POLLIN, .revents = 0};
 
@@ -387,7 +392,7 @@ std::vector<uint8_t> Client::recv_all(size_t chunk_size, int poll_ms) {
 		}
 
 		int read = 0;
-		if (_is_ssl && _ssl)
+		if (_is_flag(Flags::IS_SSL) && _ssl)
 			read = SSL_read(_ssl, temp.data(), temp.size());
 		else
 			read = ::recv(_c_socket, temp.data(), temp.size(), 0);
@@ -432,14 +437,14 @@ bool Client::_set_cert_store() {
 }
 
 void Client::_cleanup() {
-	if (_connected && _ssl)
+	if (_is_flag(Flags::CONNECTED) && _ssl)
 		SSL_shutdown(_ssl);
 
-	if (_connected)
+	if (_is_flag(Flags::CONNECTED))
 		shutdown(_c_socket, SHUT_RDWR);
 
-	_connected = false;
-	_setup = false;
+	_clear_flag(Flags::CONNECTED);
+	_clear_flag(Flags::SETUP);
 
 	if (_ssl) {
 		SSL_free(_ssl);
