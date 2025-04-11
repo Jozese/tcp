@@ -1,2 +1,3 @@
 *.pch
 examples/tcp_example
+.clang-format
