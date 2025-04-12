@@ -1,5 +1,4 @@
 #include "tcp.hpp"
-#include <cstdlib>
 
 namespace Tcp {
 Client::Client(const std::string& host, const std::string& port) : _host(host), _port(port) {

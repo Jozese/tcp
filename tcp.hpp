@@ -1,4 +1,3 @@
-#include <_strings.h>
 #include <cstddef>
 #include <cstdint>
 #include <iomanip>
@@ -59,15 +58,6 @@
 
 namespace Tcp {
 class Client {
-  public:
-	enum class Flags : uint32_t {
-		IS_SSL = 1 << 0,
-		CONNECTED = 1 << 1,
-		SETUP = 1 << 2,
-		VERIFY = 1 << 3,
-		DISABLE_INSECURE = 1 << 4,
-		VERIFY_HOSTNAME = 1 << 5,
-	};
 
   public:
 	Client(const std::string& host, const std::string& port);
@@ -133,25 +123,6 @@ class Client {
 	void set_tls_max_version(int version);
 
   private:
-	uint32_t _flags = 0x00310001;
-
-	void _set_flag_bool(Flags flag, bool is) {
-		is ? _set_flag(flag) : _clear_flag(flag);
-	}
-
-	void _set_flag(Flags flag) {
-		_flags |= static_cast<uint32_t>(flag);
-	}
-
-	void _clear_flag(Flags flag) {
-		_flags &= ~static_cast<uint32_t>(flag);
-	}
-
-	bool _is_flag(Flags flag) const {
-		return (_flags & static_cast<uint32_t>(flag)) != 0;
-	}
-
-  private:
 	bool _resolve_domain_name();
 
   private:
@@ -176,6 +147,14 @@ class Client {
 	addrinfo* _final_addr = nullptr;
 
   private:
+	// change to bitfield later
+	bool _is_ssl = true;
+	bool _connected = false;
+	bool _setup = false;
+	bool _verify = true;
+	bool _disable_insecure = true;
+	bool _verify_hostname = true;
+
 	std::pair<std::string, std::string> _paths;
 	std::vector<uint8_t> _alpn_protocols;
 	std::string _ciphers;
